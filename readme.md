@@ -7,9 +7,9 @@
 
 **You need to activate your environment every time you open new terminal, otherwise it'll use your system python and it will mess it up if you do pip install**
 
-## Install dependencies using pip
 
-- pip install -r requirements.txt
+## Dependencies
+
 
 Windows extra steps:
 
@@ -21,7 +21,12 @@ https://github.com/opencv/opencv/releases
 
 Here is tesserocr info about Windows https://github.com/sirfz/tesserocr
 
-## Dependencies
+
+
+### Ubuntu packages 
+
+    apt install libtesseract-dev tesseract-ocr-eng libopencv-dev
+
 
 - Get libs - tesseract, opencv
 - Get tesseract trained data for required languages and copy to your tesseract/tessdata folder https://github.com/tesseract-ocr/tesseract/wiki/Data-Files
@@ -31,12 +36,20 @@ https://github.com/tesseract-ocr/tessdata
 check this file for where to download it
 https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.py
 
+## Install dependencies using pip
+
+    pip install -r requirements.txt
+
 ## Set Environment variables
 
-> PowerShell set env vars (change to your paths)
-> $env:PATH+=";E:\tesseract\"
-> $env:PATH+=";E:\opencv\build\x64\vc15\bin"
-> $env:TESSDATA_PREFIX+="E:\tesseract\tessdata"
+(PowerShell) set env vars (change to your paths)  
+
+> $env:PATH+=";E:\tesseract\"  
+> $env:PATH+=";E:\opencv\build\x64\vc15\bin"  
+> $env:TESSDATA_PREFIX+="E:\tesseract\tessdata"  
+
+
+(This extra steps can be omitted on certain platforms)
 
 - **$PATH**: OpenCV must be present, tesseract as well
 - **$TESSDATA_PREFIX**: Should point to tesseract install dir tessdata/ subfolder, ensure it has language data
