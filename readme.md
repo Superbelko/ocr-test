@@ -1,46 +1,106 @@
+# Simple OCR processing application(script)
 
-## Make virtual environment
-- python -m venv venv## (where ## is your python version, such as 37 for python 3.7)
-- venv##/Scripts/activate (Windows)
-- source ./venv##/bin/activate (Linux)
-- python -m pip install --upgrade pip
-
-**You need to activate your environment every time you open new terminal, otherwise it'll use your system python and it will mess it up if you do pip install**
+This is a basic OCR system that is created to help picking up text from video stream (or still images), and output JSON data on where and what was detected, it produces rect coordinates with text recognized and confidences.
 
 
-## Dependencies
+## Installation
 
+In order to work this script requires that your machine has Python 3, OpenCV and Tesseract installed. 
 
-Windows extra steps:
+On Linux (and Mac?) these can be obtained from your OS package manager. 
 
-- Get OpenCV DLL's, extract somewhere (will need to add to %PATH% later)
-https://github.com/opencv/opencv/releases
-- Get one of the .whl from https://github.com/simonflueckiger/tesserocr-windows_build/releases
-- pip install tesserocr-{wutever-ver}.whl
-- Get tesseract binaries for v4.x from https://github.com/UB-Mannheim/tesseract/wiki
+On Windows you have to manually download and install these libraries.
 
-Here is tesserocr info about Windows https://github.com/sirfz/tesserocr
+Before doing any setup grab OpenCV trained data
 
+The link to the actual data may change, so open up this file in text editor and find the URL for 'EAST' model, download and save it.
 
+https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.py
+
+Now let's move on to the platform specific packages.
 
 ### Ubuntu packages 
 
+Most systems should have everything required in their package management systems, on Ubuntu Linux for example this is all what you need
+
     apt install libtesseract-dev tesseract-ocr-eng libopencv-dev
 
+But also install python3 if not present yet.
 
-- Get libs - tesseract, opencv
-- Get tesseract trained data for required languages and copy to your tesseract/tessdata folder https://github.com/tesseract-ocr/tesseract/wiki/Data-Files
+    apt install python3 pip3
+
+### Windows prebuilt binaries
+
+Download and extract those in relevant location, later you will need to update system's %PATH% variable to point to OpenCV and Tesseract location 
+ 
+OpenCV
+https://github.com/opencv/opencv/releases
+
+Tesseract 4.x
+https://github.com/UB-Mannheim/tesseract/wiki
+
+
+You will need tesseract trained data for the required languages (copy this to tesseract/tessdata folder)
+
+https://github.com/tesseract-ocr/tesseract/wiki/Data-Files
+
 https://github.com/tesseract-ocr/tessdata
 
-- Get OpenCV trained model for EAST
-check this file for where to download it
-https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.py
+Additionally you will need prebuilt python package for tesseract (.whl file)
+
+https://github.com/simonflueckiger/tesserocr-windows_build/releases
+
+
+
+### Make virtual environment
+
+Now when you have those libraries let's start with creating virtual environment
+
+Python 2.x (Linux) / Windows
+
+    python -m venv venv## 
+
+Python 3 (Linux)
+
+    python3 -m venv venv##
+
+Where ## is your Python version, such as 37 for Python 3.7
+
+Now we can activate it and install Python packages
+
+Windows
+
+    ./venv##/Scripts/activate 
+
+Linux 
+
+    source ./venv##/bin/activate
+
+And also update the newly created environment's pip
+
+    python -m pip install --upgrade pip
+
+
+**On Linux this script will set temporary alias so if previously you were using ```python3``` explicitly now it will be just ```python```. It also might add deactivate() shell function to clear this off so you can continue using your system Python without restarting the terminal**
+
+**Remember that you will need to activate your environment every time you open new terminal, otherwise it'll use your system python and it will mess it up if you do pip install**
+
 
 ## Install dependencies using pip
 
+Now we are ready to install python packages, let's do it
+
     pip install -r requirements.txt
 
+(Windows only) 
+We have to install prebuilt .whl for tesserocr you've downloaded previously
+
+    pip install tesserocr-{downloaded.version}.whl
+
+
 ## Set Environment variables
+
+On some platforms we might have to update system's ```PATH``` environment variable, on Linux this may already handled when you did installation using package manager, on Windows however you have to do it manually
 
 (PowerShell) set env vars (change to your paths)  
 
@@ -49,13 +109,19 @@ https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.
 > $env:TESSDATA_PREFIX+="E:\tesseract\tessdata"  
 
 
-(This extra steps can be omitted on certain platforms)
+And for reference here is what is expected
 
-- **$PATH**: OpenCV must be present, tesseract as well
+- **$PATH**: OpenCV .so/.dll, tesseract as well
 - **$TESSDATA_PREFIX**: Should point to tesseract install dir tessdata/ subfolder, ensure it has language data
 
 
 ## Run the app
+
+Everything should be ready to run the script. 
+
+Remember that you must activate the environment if not yet.
+
+Finally let's run it.
 
     python combined.py --input <path/to/file> [--width #] [--height #] [--frame #]
 
