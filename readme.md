@@ -131,3 +131,25 @@ You don't need to set width and height, however you should keep aspect ratio if 
 You can also pass --frame \<number\> to pick specific frame from video file
 
 Use --debug to see visualization
+
+
+## Minimalistic Web Server (optional)
+
+For testing purposes there is basic web server available, it accepts file with width and height using POST request.
+
+To run this server grab ```flask``` using pip.
+
+    pip install flask
+
+Follow flask instructions and set environment and flask script app(server.py without extension, in this case) to run, optionally using prod or development version
+
+    export FLASK_APP=server
+    export FLASK_ENV=development
+
+Run the server.
+
+    flask run
+
+Open http://127.0.0.1:5000 in a browser.
+
+_For more information refer to flask documentation._

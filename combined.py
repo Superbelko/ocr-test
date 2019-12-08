@@ -266,6 +266,8 @@ def main():
         # Display the frame
         if args.debug:
             cv.imshow(kWinName,frame)
+
+        cv.destroyAllWindows()
         
         print(json.dumps(results))
 
