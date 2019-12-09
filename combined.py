@@ -263,13 +263,15 @@ def main():
         # Put efficiency information
         cv.putText(frame, label, (0, 15), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0))
 
+        print(json.dumps(results))
+
         # Display the frame
         if args.debug:
             cv.imshow(kWinName,frame)
-
-        cv.destroyAllWindows()
+            cv.waitKey(-1)
         
-        print(json.dumps(results))
+        cv.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
