@@ -1,5 +1,6 @@
 # Import required modules
 import argparse
+import datetime
 import math
 import json
 from collections import namedtuple
@@ -16,6 +17,7 @@ WINDOW_LABEL = 'Debug view'
 
 TextRegion = namedtuple('TextRegion', ['vertices', 'bounding_box'])
 
+Rect = namedtuple('Rect', ['xmin', 'ymin', 'xmax', 'ymax'])
 
 ############ Utility functions ############
 def decode(scores, geometry, scoreThresh):
@@ -234,7 +236,16 @@ def is_too_wide_for(obj, dim):
     """Filters too wide objects in detected objects list"""
 
     left, top, right, bottom = obj[2] # rect
-    return (right-left)/dim < 0.5
+    return (right-left)/dim > 0.5
+
+
+def is_rects_overlap(a, b): 
+    if int(a.xmin) > int(b.xmax) or int(a.xmax) < int(b.xmin):
+        return False
+    if int(b.ymin) > int(b.ymax) or int(a.ymax) < int(b.ymin):
+        return False
+    return True
+
 
 def main():
     parser = argparse.ArgumentParser(description='Use this script to run TensorFlow implementation (https://github.com/argman/EAST) of EAST: An Efficient and Accurate Scene Text Detector (https://arxiv.org/abs/1704.03155v2)')
@@ -294,9 +305,8 @@ def main():
         if not hasFrame:
             break
         
-        # wip stuff
-        #objects = detect_objects(frame, objdetectmodel, threshold=0.25)
-        #filtered_objects = filter(lambda obj: is_too_wide_for(obj, frame.shape[1]), objects)
+        objects = detect_objects(frame, objdetectmodel, threshold=0.2)
+        filtered_objects = list(filter(lambda obj: not is_too_wide_for(obj, frame.shape[1]), objects))
 
         # resize source image for text detection
         resized = cv.resize(frame, (inpWidth, inpHeight))
@@ -305,9 +315,20 @@ def main():
 
         output = []
         result = []
-        for region in text_areas:
+        ids = [] # only used for debug
+        for i, region in enumerate(text_areas):
+
+            overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj[2])), 
+                            filtered_objects))
+
+            if not len(overlaps):
+                result.append(('', 0))
+                ids.append(i)
+                continue
+
             ocr = ocr_image_region(frame, region)
             result.append(ocr)
+            
             output.append({
                 'rect': {
                     'x': region[0].bounding_box[0], 
@@ -322,7 +343,12 @@ def main():
         print(json.dumps(output))
 
         if args.debug:
+            for obj in filtered_objects:
+                left, top, right, bottom = obj[2]
+                cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (73, 255, 0), thickness=2)
             for i, text in enumerate(text_areas):
+                if i in ids:
+                    continue
                 left, top, right, bottom = text[0].bounding_box
                 cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=1)
                 cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
