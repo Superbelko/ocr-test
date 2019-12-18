@@ -4,6 +4,7 @@ import datetime
 import math
 import json
 from collections import namedtuple
+from pathlib import Path
 
 import numpy as np
 import cv2 as cv
@@ -11,6 +12,7 @@ from tesserocr import PyTessBaseAPI, PSM, OEM, RIL, iterate_level
 
 import perspective
 from objdetect import detect_objects, CLASSES
+from lockfile import LockDummy, LockFile
 
 
 WINDOW_LABEL = 'Debug view'
@@ -247,6 +249,11 @@ def is_rects_overlap(a, b):
     return True
 
 
+def get_lock(dummy):
+    if dummy:
+        return LockDummy
+    return LockFile
+
 def main():
     parser = argparse.ArgumentParser(description='Use this script to run TensorFlow implementation (https://github.com/argman/EAST) of EAST: An Efficient and Accurate Scene Text Detector (https://arxiv.org/abs/1704.03155v2)')
     parser.add_argument('--input', help='Path to input image or video file.', required=True)
@@ -266,8 +273,11 @@ def main():
                         help='Optional end time of the range (Video only).')
     parser.add_argument('--frame',type=int, default=-1,
                         help='Specify frame number to read at (Video only).')
+    parser.add_argument('--step',type=int, default=1,
+                        help='Video stream frame step count')
     parser.add_argument('--info', action='store_true', help='Show video file stats. Skips processing.')
     parser.add_argument('--debug', action='store_true', help='Show window with debug information')
+    parser.add_argument('--nolock', action='store_true', help='Do not create lock file')
     args = parser.parse_args()
 
     # Read and store arguments
@@ -293,18 +303,30 @@ def main():
         print_video_stats(cap)
         exit()
 
+    starttime = datetime.datetime.now()
+
     net, outNames = create_network(model)
 
     set_next_frame(cap, args.frame)
     
     wait_ms = get_wait_time(cap)
 
+    lockfile = get_lock(args.nolock)(imsrc+'.lock')
+    frames = []
     while cv.waitKey(wait_ms) < 0:
         # Read frame
         hasFrame, frame = cap.read()
         if not hasFrame:
             break
         
+        current_frame = int(cap.get(cv.CAP_PROP_POS_FRAMES)-1)
+
+        lockfile.write(('Started: {}\nFrame: {}/{}').format(
+            starttime.isoformat(), 
+            current_frame, 
+            int(cap.get(cv.CAP_PROP_FRAME_COUNT)))
+        )
+
         objects = detect_objects(frame, objdetectmodel, threshold=0.2)
         filtered_objects = list(filter(lambda obj: not is_too_wide_for(obj, frame.shape[1]), objects))
 
@@ -313,7 +335,7 @@ def main():
 
         text_areas = detect_text_areas(resized, net, sourceSize=(frame.shape[1], frame.shape[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
 
-        output = []
+        ocrresults = []
         result = []
         ids = [] # only used for debug
         for i, region in enumerate(text_areas):
@@ -329,7 +351,7 @@ def main():
             ocr = ocr_image_region(frame, region)
             result.append(ocr)
             
-            output.append({
+            ocrresults.append({
                 'rect': {
                     'x': region[0].bounding_box[0], 
                     'y': region[0].bounding_box[1], 
@@ -340,7 +362,13 @@ def main():
                 'confidence': ocr[1]
             })
 
-        print(json.dumps(output))
+        frames.append({
+            'frame': current_frame,
+            'time': round(cap.get(cv.CAP_PROP_POS_MSEC), 2), # .2f format
+            'ocr': ocrresults
+        })
+
+        set_next_frame(cap, int(cap.get(cv.CAP_PROP_POS_FRAMES)-1) + args.step)
 
         if args.debug:
             for obj in filtered_objects:
@@ -353,6 +381,18 @@ def main():
                 cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=1)
                 cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
             cv.imshow(WINDOW_LABEL, frame)
+
+    finishtime = datetime.datetime.now()
+
+    output = {
+        'version': 1,
+        'started': starttime.isoformat(),
+        'finished': finishtime.isoformat(),
+        'file': Path(imsrc).name,
+        'frames': frames
+    }
+
+    print(json.dumps(output))
 
     if args.debug:
         cv.waitKey()

@@ -17,6 +17,9 @@ The link to the actual data may change, so open up this file in text editor and 
 
 https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.py
 
+MobileNet SSD v2 weights and config data
+https://github.com/opencv/opencv/wiki/TensorFlow-Object-Detection-API
+
 Now let's move on to the platform specific packages.
 
 ### Ubuntu packages 
