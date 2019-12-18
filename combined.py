@@ -3,6 +3,7 @@ import argparse
 import datetime
 import math
 import json
+import sys
 from collections import namedtuple
 from pathlib import Path
 
@@ -313,74 +314,80 @@ def main():
 
     lockfile = get_lock(args.nolock)(imsrc+'.lock')
     frames = []
-    while cv.waitKey(wait_ms) < 0:
-        # Read frame
-        hasFrame, frame = cap.read()
-        if not hasFrame:
-            break
-        
-        current_frame = int(cap.get(cv.CAP_PROP_POS_FRAMES)-1)
-
-        lockfile.write(('Started: {}\nFrame: {}/{}').format(
-            starttime.isoformat(), 
-            current_frame, 
-            int(cap.get(cv.CAP_PROP_FRAME_COUNT)))
-        )
-
-        objects = detect_objects(frame, objdetectmodel, threshold=0.2)
-        filtered_objects = list(filter(lambda obj: not is_too_wide_for(obj, frame.shape[1]), objects))
-
-        # resize source image for text detection
-        resized = cv.resize(frame, (inpWidth, inpHeight))
-
-        text_areas = detect_text_areas(resized, net, sourceSize=(frame.shape[1], frame.shape[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
-
-        ocrresults = []
-        result = []
-        ids = [] # only used for debug
-        for i, region in enumerate(text_areas):
-
-            overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj[2])), 
-                            filtered_objects))
-
-            if not len(overlaps):
-                result.append(('', 0))
-                ids.append(i)
-                continue
-
-            ocr = ocr_image_region(frame, region)
-            result.append(ocr)
+    try:
+        while cv.waitKey(wait_ms) < 0:
+            # Read frame
+            hasFrame, frame = cap.read()
+            if not hasFrame:
+                break
             
-            ocrresults.append({
-                'rect': {
-                    'x': region[0].bounding_box[0], 
-                    'y': region[0].bounding_box[1], 
-                    'x1': region[0].bounding_box[2], 
-                    'y1': region[0].bounding_box[3]
-                }, 
-                'text': ocr[0], 
-                'confidence': ocr[1]
+            current_frame = int(cap.get(cv.CAP_PROP_POS_FRAMES)-1)
+
+            lockfile.write(('Started: {}\nFrame: {}/{}').format(
+                starttime.isoformat(), 
+                current_frame, 
+                int(cap.get(cv.CAP_PROP_FRAME_COUNT)))
+            )
+
+            objects = detect_objects(frame, objdetectmodel, threshold=0.2)
+            filtered_objects = list(filter(lambda obj: not is_too_wide_for(obj, frame.shape[1]), objects))
+
+            # resize source image for text detection
+            resized = cv.resize(frame, (inpWidth, inpHeight))
+
+            text_areas = detect_text_areas(resized, net, sourceSize=(frame.shape[1], frame.shape[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
+
+            ocrresults = []
+            result = []
+            ids = [] # only used for debug
+            for i, region in enumerate(text_areas):
+
+                overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj[2])), 
+                                filtered_objects))
+
+                if not len(overlaps):
+                    result.append(('', 0))
+                    ids.append(i)
+                    continue
+
+                ocr = ocr_image_region(frame, region)
+                result.append(ocr)
+                
+                ocrresults.append({
+                    'rect': {
+                        'x': region[0].bounding_box[0], 
+                        'y': region[0].bounding_box[1], 
+                        'x1': region[0].bounding_box[2], 
+                        'y1': region[0].bounding_box[3]
+                    }, 
+                    'text': ocr[0], 
+                    'confidence': ocr[1]
+                })
+
+            frames.append({
+                'frame': current_frame,
+                'time': round(cap.get(cv.CAP_PROP_POS_MSEC), 2), # .2f format
+                'ocr': ocrresults
             })
 
-        frames.append({
-            'frame': current_frame,
-            'time': round(cap.get(cv.CAP_PROP_POS_MSEC), 2), # .2f format
-            'ocr': ocrresults
-        })
+            set_next_frame(cap, int(cap.get(cv.CAP_PROP_POS_FRAMES)-1) + args.step)
 
-        set_next_frame(cap, int(cap.get(cv.CAP_PROP_POS_FRAMES)-1) + args.step)
-
-        if args.debug:
-            for obj in filtered_objects:
-                left, top, right, bottom = obj[2]
-                cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (73, 255, 0), thickness=2)
-            for i, text in enumerate(text_areas):
-                if i in ids:
-                    continue
-                left, top, right, bottom = text[0].bounding_box
-                cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=1)
-                cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
-            cv.imshow(WINDOW_LABEL, frame)
+            if args.debug:
+                for obj in filtered_objects:
+                    left, top, right, bottom = obj[2]
+                    cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (73, 255, 0), thickness=2)
+                for i, text in enumerate(text_areas):
+                    if i in ids:
+                        continue
+                    left, top, right, bottom = text[0].bounding_box
+                    cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=1)
+                    cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
+                cv.imshow(WINDOW_LABEL, frame)
+                
+    except e:
+        print(e, file=sys.stderr)
+        with open(imsrc+'.log') as f:
+            f.write(e)
 
     finishtime = datetime.datetime.now()
 
