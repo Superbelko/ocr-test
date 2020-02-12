@@ -1,12 +1,22 @@
 import argparse
 import json
 import math
+from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 import cv2 as cv
 
 from blur import laplacian_variance
 import perspective
+
+
+@dataclass
+class DetectedObject:
+    class_id: int
+    confidence: float
+    rect: tuple()
+
 
 # Pretrained classes in the model
 CLASSES = {0: 'background',
@@ -28,7 +38,7 @@ CLASSES = {0: 'background',
               86: 'vase', 87: 'scissors', 88: 'teddy bear', 89: 'hair drier', 90: 'toothbrush'}
 
 
-def detect_objects(image, nnconfig, threshold=0.2):
+def detect_objects(image, nnconfig, threshold=0.2) -> List[DetectedObject]:
     """Detects all objects in an image
     Accepts opencv compatible image and single tuple with NN weight and description file paths
 
@@ -62,7 +72,7 @@ def detect_objects(image, nnconfig, threshold=0.2):
         right = detection[5] * image_width
         bottom = detection[6] * image_height
 
-        results.append((class_id, confidence, (left,top,right,bottom)))
+        results.append(DetectedObject(class_id, confidence, (left,top,right,bottom)))
 
     return results
 

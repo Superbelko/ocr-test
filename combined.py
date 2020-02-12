@@ -12,7 +12,7 @@ import cv2 as cv
 from tesserocr import PyTessBaseAPI, PSM, OEM, RIL, iterate_level
 
 import perspective
-from objdetect import detect_objects, CLASSES
+from objdetect import DetectedObject, CLASSES, detect_objects
 from lockfile import LockDummy, LockFile
 
 
@@ -238,7 +238,7 @@ def set_next_frame(cap, frame):
 def is_too_wide_for(obj, dim):
     """Filters too wide objects in detected objects list"""
 
-    left, top, right, bottom = obj[2] # rect
+    left, top, right, bottom = obj.rect # rect
     return (right-left)/dim > 0.5
 
 
@@ -342,7 +342,7 @@ def main():
             ids = [] # only used for debug
             for i, region in enumerate(text_areas):
 
-                overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj[2])), 
+                overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj.rect)), 
                                 filtered_objects))
 
                 if not len(overlaps):
@@ -374,7 +374,7 @@ def main():
 
             if args.debug:
                 for obj in filtered_objects:
-                    left, top, right, bottom = obj[2]
+                    left, top, right, bottom = obj.rect
                     cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (73, 255, 0), thickness=2)
                 for i, text in enumerate(text_areas):
                     if i in ids:
@@ -384,7 +384,7 @@ def main():
                     cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
                 cv.imshow(WINDOW_LABEL, frame)
                 
-    except e:
+    except Exception as e:
         print(e, file=sys.stderr)
         with open(imsrc+'.log') as f:
             f.write(e)

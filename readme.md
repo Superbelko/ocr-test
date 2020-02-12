@@ -5,7 +5,7 @@ This is a basic OCR system that is created to help picking up text from video st
 
 ## Installation
 
-In order to work this script requires that your machine has Python 3, OpenCV and Tesseract installed. 
+In order to work this script requires that your machine has Python 3.6 or newer, OpenCV and Tesseract installed. 
 
 On Linux (and Mac?) these can be obtained from your OS package manager. 
 
