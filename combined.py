@@ -6,6 +6,8 @@ import json
 import sys
 from collections import namedtuple
 from pathlib import Path
+from dataclasses import dataclass, astuple
+from typing import List, Union
 
 import numpy as np
 import cv2 as cv
@@ -18,9 +20,19 @@ from lockfile import LockDummy, LockFile
 
 WINDOW_LABEL = 'Debug view'
 
-TextRegion = namedtuple('TextRegion', ['vertices', 'bounding_box'])
+@dataclass(frozen=True)
+class Rect:
+    xmin: float
+    ymin: float
+    xmax: float
+    ymax: float
 
-Rect = namedtuple('Rect', ['xmin', 'ymin', 'xmax', 'ymax'])
+
+@dataclass
+class TextRegion:
+    vertices: np.ndarray
+    bounding_box: Rect
+
 
 ############ Utility functions ############
 def decode(scores, geometry, scoreThresh):
@@ -90,14 +102,14 @@ def get_file_ocr_result(image, rect):
     return [text, confidence]
 
 
-def get_blob_ocr_result(image, rect, ppi=0):
+def get_blob_ocr_result(image, rect: Rect, ppi: int = 0):
     text = ''
     confidence = 0.0
     with PyTessBaseAPI(psm=PSM.SINGLE_LINE) as api:
         # only read numbers (doesn't seem to work)
         #api.SetVariable('tessedit_char_whitelist', '0123456789')
         api.SetImageBytes(*image)
-        api.SetRectangle(*rect)
+        api.SetRectangle(*astuple(rect))
         if ppi != 0:
             api.SetSourceResolution(ppi)
         #api.Recognize()
@@ -136,7 +148,7 @@ def ocr_image_region(image, region):
     ocr_image = cv.cvtColor(ocr_image, cv.COLOR_RGB2GRAY)
     img_w = ocr_image.shape[1]
     img_h = ocr_image.shape[0]
-    tess_rect = (0,0, img_w, img_h)
+    tess_rect = Rect(0,0, img_w, img_h)
     img_bpp = 1
     img_bpl = int(img_bpp * img_w)
 
@@ -222,13 +234,13 @@ def create_network(model):
     return net, outNames
 
 
-def adjust_dimension(size):
+def adjust_dimension(size: float) -> int:
     """Adjusts size to satisfy EAST requirements"""
 
     return int(32 * math.ceil(size/32))
 
 
-def set_next_frame(cap, frame):
+def set_next_frame(cap: cv.VideoCapture, frame: int) -> None:
     """Rewind capture to specified frame number if possible"""
 
     if frame != -1 and cap.get(cv.CAP_PROP_FRAME_COUNT) > 1:
@@ -242,7 +254,7 @@ def is_too_wide_for(obj, dim):
     return (right-left)/dim > 0.5
 
 
-def is_rects_overlap(a, b): 
+def is_rects_overlap(a: Rect, b: Rect) -> bool: 
     if int(a.xmin) > int(b.xmax) or int(a.xmax) < int(b.xmin):
         return False
     if int(b.ymin) > int(b.ymax) or int(a.ymax) < int(b.ymin):
@@ -250,7 +262,7 @@ def is_rects_overlap(a, b):
     return True
 
 
-def get_lock(dummy):
+def get_lock(dummy: bool) -> LockFile:
     if dummy:
         return LockDummy
     return LockFile
