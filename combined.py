@@ -14,7 +14,7 @@ import numpy as np
 import cv2 as cv
 from tesserocr import PyTessBaseAPI, PSM, OEM, RIL, iterate_level
 
-import perspective
+import app.perspective as perspective
 from app.objdetect import ObjDetectNetConfig, DetectedObject, CLASSES, detect_objects
 from app.lockfile import LockDummy, LockFile
 from app.common import Rect, Point

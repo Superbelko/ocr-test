@@ -9,7 +9,7 @@ import cv2 as cv
 
 from blur import laplacian_variance
 from app.common import Rect
-import perspective
+import app.perspective as perspective
 
 
 @dataclass(frozen=True)

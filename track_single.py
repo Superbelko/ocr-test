@@ -16,7 +16,7 @@ import cv2 as cv
 from tesserocr import PyTessBaseAPI, PSM, OEM, RIL, iterate_level
 from fuzzywuzzy import fuzz
 
-import perspective
+import app.perspective as perspective
 from app.objdetect import ObjDetectNetConfig, DetectedObject, CLASSES, detect_objects
 from app.lockfile import LockDummy, LockFile
 from combined import *
@@ -341,10 +341,10 @@ def main():
                 "ocr": ocr if comparer(ocr) else None,
                 "people": [
                     {"rect": {
-                        "x": f.trackobj.xmin,
-                        "y": f.trackobj.ymin,
-                        "x1": f.trackobj.xmax,
-                        "y1": f.trackobj.ymax
+                        "x": int(f.trackobj.xmin),
+                        "y": int(f.trackobj.ymin),
+                        "x1": int(f.trackobj.xmax),
+                        "y1": int(f.trackobj.ymax)
                     }},
                 ]
             })
