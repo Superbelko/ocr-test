@@ -8,14 +8,21 @@ import numpy as np
 import cv2 as cv
 
 from blur import laplacian_variance
+from app.common import Rect
 import perspective
+
+
+@dataclass(frozen=True)
+class ObjDetectNetConfig:
+    model: str
+    config: str
 
 
 @dataclass
 class DetectedObject:
     class_id: int
     confidence: float
-    rect: tuple()
+    rect: Rect
 
 
 # Pretrained classes in the model
@@ -38,7 +45,7 @@ CLASSES = {0: 'background',
               86: 'vase', 87: 'scissors', 88: 'teddy bear', 89: 'hair drier', 90: 'toothbrush'}
 
 
-def detect_objects(image, nnconfig, threshold=0.2) -> List[DetectedObject]:
+def detect_objects(image: np.ndarray, nnconfig: ObjDetectNetConfig, threshold: float=0.2) -> List[DetectedObject]:
     """Detects all objects in an image
     Accepts opencv compatible image and single tuple with NN weight and description file paths
 
@@ -47,7 +54,7 @@ def detect_objects(image, nnconfig, threshold=0.2) -> List[DetectedObject]:
 
     image_height, image_width, _ = image.shape
 
-    net = cv.dnn.readNetFromTensorflow(nnconfig[0], nnconfig[1])
+    net = cv.dnn.readNetFromTensorflow(nnconfig.model, nnconfig.config)
     net.setInput(cv.dnn.blobFromImage(image, 1, (300, 300), (127.5, 127.5, 127.5), swapRB = True, crop = False))
     
     output = net.forward()
@@ -72,7 +79,7 @@ def detect_objects(image, nnconfig, threshold=0.2) -> List[DetectedObject]:
         right = detection[5] * image_width
         bottom = detection[6] * image_height
 
-        results.append(DetectedObject(class_id, confidence, (left,top,right,bottom)))
+        results.append(DetectedObject(class_id, confidence, Rect(left,top,right,bottom)))
 
     return results
 
@@ -91,7 +98,7 @@ def main():
 
 
     frame = cv.imread(args.input)
-    objects = detect_objects(frame, (args.model, args.modelcfg), args.thr)
+    objects = detect_objects(frame, ObjDetectNetConfig(args.model, args.modelcfg), args.thr)
 
     round_float = lambda a: round(a, 2)
 

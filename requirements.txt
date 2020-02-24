@@ -3,3 +3,5 @@ numpy==1.17.4
 tesserocr==2.4.0; sys_platform != 'win32'
 opencv-python==4.1.1.26
 dataclasses==0.7; python_version < '3.7'
+python-Levenshtein==0.12.0
+fuzzywuzzy==0.17.0

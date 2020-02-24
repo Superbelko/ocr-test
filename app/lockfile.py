@@ -31,10 +31,9 @@ class LockFile(LockDummy):
     def __exit__(self, *args, **kwargs):
         try:
             self.file.close()
+            os.remove(self.path)
         except:
             pass
-        finally:
-            os.remove(self.path)
     
     def __del__(self):
         self.__exit__()

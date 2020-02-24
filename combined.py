@@ -4,28 +4,25 @@ import datetime
 import math
 import json
 import sys
+import os
 from collections import namedtuple
 from pathlib import Path
 from dataclasses import dataclass, astuple
-from typing import List, Union
+from typing import List, Union, Tuple
 
 import numpy as np
 import cv2 as cv
 from tesserocr import PyTessBaseAPI, PSM, OEM, RIL, iterate_level
 
 import perspective
-from objdetect import DetectedObject, CLASSES, detect_objects
-from lockfile import LockDummy, LockFile
+from app.objdetect import ObjDetectNetConfig, DetectedObject, CLASSES, detect_objects
+from app.lockfile import LockDummy, LockFile
+from app.common import Rect, Point
 
+APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 WINDOW_LABEL = 'Debug view'
 
-@dataclass(frozen=True)
-class Rect:
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float
 
 
 @dataclass
@@ -91,22 +88,22 @@ def decode(scores, geometry, scoreThresh):
     return [detections, confidences]
 
 
-def get_file_ocr_result(image, rect):
+def get_file_ocr_result(image: str, rect: Rect):
     text = ''
     confidence = 0.0
     with PyTessBaseAPI() as api:
         api.SetImageFile(image)
-        api.SetRectangle(*rect)
+        api.SetRectangle(*astuple(rect))
         text = api.GetUTF8Text()
         confidence = api.AllWordConfidences()
     return [text, confidence]
 
 
-def get_blob_ocr_result(image, rect: Rect, ppi: int = 0):
+def get_blob_ocr_result(image: np.ndarray, rect: Rect, ppi: int = 0):
     text = ''
     confidence = 0.0
     with PyTessBaseAPI(psm=PSM.SINGLE_LINE) as api:
-        # only read numbers (doesn't seem to work)
+        # only read numbers (doesn't seem to work, known issue in v4.0)
         #api.SetVariable('tessedit_char_whitelist', '0123456789')
         api.SetImageBytes(*image)
         api.SetRectangle(*astuple(rect))
@@ -135,7 +132,7 @@ def get_wait_time(cap):
         return int((1/cap.get(cv.CAP_PROP_FPS)) * 1000)
 
 
-def ocr_image_region(image, region):
+def ocr_image_region(image: np.ndarray, region: TextRegion) -> Tuple[str, float]:
 
     # -------------------------
     # deproject image
@@ -164,7 +161,7 @@ def ocr_image_region(image, region):
     return (text, textconf[0])
 
 
-def detect_text_areas(image, model, *args, **kwargs):
+def detect_text_areas(image, model, *args, **kwargs) -> List[Tuple[TextRegion, float]]:
 
     results = []
 
@@ -176,6 +173,10 @@ def detect_text_areas(image, model, *args, **kwargs):
     inpHeight = image.shape[0]
     rW = width_ / float(inpWidth)
     rH = height_ / float(inpHeight)
+
+    if not kwargs.get('scale', True):
+        rW = 1.0
+        rH = 1.0
 
     net = model
     confThreshold = kwargs['confThreshold']
@@ -196,18 +197,24 @@ def detect_text_areas(image, model, *args, **kwargs):
     [boxes, confidences] = decode(scores, geometry, confThreshold)
 
     # Apply NMS
+    #im = image.copy()
     indices = cv.dnn.NMSBoxesRotated(boxes, confidences, confThreshold,nmsThreshold)
     for i in indices:
         # get 4 corners of the rotated rect
         vertices = cv.boxPoints(boxes[i[0]])
+
+        #cv.drawContours(im, [np.int0(vertices)], -1, (0, 255, 0), 2)
+        #cv.imshow(WINDOW_LABEL, im)
+        #cv.waitKey()
+
         # scale the bounding box coordinates based on the respective ratios
         for j in range(4):
             vertices[j][0] *= rW
             vertices[j][1] *= rH
-        for j in range(4):
-            p1 = (vertices[j][0], vertices[j][1])
-            p2 = (vertices[(j + 1) % 4][0], vertices[(j + 1) % 4][1])
-            #cv.line(frame, p1, p2, (0, 255, 0), 1)
+        #for j in range(4):
+        #    p1 = (vertices[j][0], vertices[j][1])
+        #    p2 = (vertices[(j + 1) % 4][0], vertices[(j + 1) % 4][1])
+        #    #cv.line(frame, p1, p2, (0, 255, 0), 1)
 
         xmin = vertices[0][0]
         xmax = 0
@@ -219,7 +226,7 @@ def detect_text_areas(image, model, *args, **kwargs):
             xmax = int(max(xmax, p[0]))
             ymax = int(max(ymax, p[1]))
 
-        results.append((TextRegion(vertices, (xmin, ymin, xmax, ymax)), confidences[i[0]]))
+        results.append((TextRegion(vertices, Rect(xmin, ymin, xmax, ymax)), confidences[i[0]]))
 
     return results
 
@@ -247,10 +254,11 @@ def set_next_frame(cap: cv.VideoCapture, frame: int) -> None:
         cap.set(cv.CAP_PROP_POS_FRAMES, frame)
 
 
-def is_too_wide_for(obj, dim):
+def is_too_wide_for(obj: DetectedObject, dim: float) -> bool:
     """Filters too wide objects in detected objects list"""
-
-    left, top, right, bottom = obj.rect # rect
+    if obj.class_id == 1: # people are always ok
+        return False
+    left, top, right, bottom = astuple(obj.rect) # rect
     return (right-left)/dim > 0.5
 
 
@@ -267,26 +275,68 @@ def get_lock(dummy: bool) -> LockFile:
         return LockDummy
     return LockFile
 
+def test_find_rect_contour(frame: np.ndarray) -> None:
+    """Find rects and try OCR them."""
+
+    bw = cv.cvtColor(frame, cv.COLOR_RGB2GRAY)
+    bw = cv.GaussianBlur(bw, (5,5), 0)
+    bw = cv.Canny(bw, 35,125)
+    cnts = cv.findContours(bw.copy(), cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)[0] # 0 for ocv4, 1 for older/alpha
+    c = max(cnts, key=cv.contourArea)
+    rct = cv.minAreaRect(c)
+    
+    box = cv.boxPoints(rct)
+    box = np.int0(box)
+    cv.drawContours(frame, [box], -1, (0, 255, 0), 2)
+    cv.line(frame, (int(box[0][0]),int(box[0][1])), (int(box[3][0]), int(box[3][1])), (0, 255, 255), 2)
+    cv.line(frame, (int(box[1][0]),int(box[1][1])), (int(box[2][0]), int(box[2][1])), (0, 255, 255), 2)
+    #cv.rectangle(bw, (int(rct[0][0]),int(rct[0][1])), (int(rct[1][0]), int(rct[1][1])), (23, 230, 210), thickness=1)
+
+    # test ocr area
+    warped = perspective.four_point_transform(frame, cv.boxPoints(rct))
+    dims = (adjust_dimension(warped.shape[1]), adjust_dimension(warped.shape[0]))
+    rszd = cv.resize(warped, dims)
+    text_areas = detect_text_areas(rszd, net, sourceSize=(dims[0], dims[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
+
+    for a in text_areas:
+        reg: TextRegion
+        conf: float
+        reg, conf = a
+        b = reg.bounding_box
+        cv.imshow(WINDOW_LABEL, rszd[b.ymin:b.ymax, b.xmin:b.xmax])
+        cv.waitKey()
+        cv.line(frame, (int(box[1][0]+b.xmin), int(box[1][1]+b.ymin)), (int(box[1][0]+b.xmax), int(box[1][1]+b.ymin)), (0, 255, 255), 2)
+        cv.line(frame, (int(box[1][0]+b.xmin), int(box[1][1]+b.ymax)), (int(box[1][0]+b.xmax), int(box[1][1]+b.ymax)), (0, 255, 255), 2)
+        cv.line(frame, (int(box[1][0]+b.xmin), int(box[1][1]+b.ymin)), (int(box[1][0]+b.xmin), int(box[1][1]+b.ymax)), (0, 255, 255), 2)
+        cv.line(frame, (int(box[1][0]+b.xmax), int(box[1][1]+b.ymin)), (int(box[1][0]+b.xmax), int(box[1][1]+b.ymax)), (0, 255, 255), 2)
+        text = ocr_image_region(rszd, a)
+        cv.putText(frame, '{} [{:.2f}%]'.format(text[0], text[1]), (int(box[1][0]+b.xmax), int(box[1][1]+b.ymax)), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+
+    #reg = (TextRegion(box, (int(box[0][0]),int(box[0][1]), int(box[3][0]), int(box[3][1]))), 0)
+    #text = ocr_image_region(frame, reg)
+    #cv.putText(frame, '{} [{:.2f}%]'.format(text[0], text[1]), (int(box[3][0]), int(box[3][1])), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+    cv.imshow(WINDOW_LABEL, frame)
+    cv.waitKey()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Use this script to run TensorFlow implementation (https://github.com/argman/EAST) of EAST: An Efficient and Accurate Scene Text Detector (https://arxiv.org/abs/1704.03155v2)')
     parser.add_argument('--input', help='Path to input image or video file.', required=True)
-    parser.add_argument('--model', default='./models/frozen_east_text_detection.pb',
-                        help='Path to a binary .pb file of model contains trained weights.')
-    parser.add_argument('--width', type=int, default=320,
+    parser.add_argument('--width', type=int, default=0,
                         help='Preprocess input image by resizing to a specific width. It should be multiple by 32.')
-    parser.add_argument('--height',type=int, default=320,
+    parser.add_argument('--height', type=int, default=0,
                         help='Preprocess input image by resizing to a specific height. It should be multiple by 32.')
     parser.add_argument('--thr',type=float, default=0.5,
                         help='Confidence threshold.')
-    parser.add_argument('--nms',type=float, default=0.4,
+    parser.add_argument('--nms', type=float, default=0.4,
                         help='Non-maximum suppression threshold.')
-    parser.add_argument('--starttime',type=str, default=None,
+    parser.add_argument('--starttime', type=str, default=None,
                         help='Optional start time of the range (Video only).')
-    parser.add_argument('--endtime',type=str, default=None,
+    parser.add_argument('--endtime', type=str, default=None,
                         help='Optional end time of the range (Video only).')
-    parser.add_argument('--frame',type=int, default=-1,
+    parser.add_argument('--frame', type=int, default=-1,
                         help='Specify frame number to read at (Video only).')
-    parser.add_argument('--step',type=int, default=1,
+    parser.add_argument('--step', type=int, default=1,
                         help='Video stream frame step count')
     parser.add_argument('--info', action='store_true', help='Show video file stats. Skips processing.')
     parser.add_argument('--debug', action='store_true', help='Show window with debug information')
@@ -298,10 +348,9 @@ def main():
     nmsThreshold = args.nms
     inpWidth = adjust_dimension(args.width)
     inpHeight = adjust_dimension(args.height)
-    model = args.model
 
     # trained model for object detection
-    objdetectmodel = ('./models/frozen_inference_graph.pb', './models/ssd_mobilenet_v2_coco_2018_03_29.pbtxt')
+    objdetectmodel = ObjDetectNetConfig(f'{APP_DIR}/models/frozen_inference_graph.pb', f'{APP_DIR}/models/ssd_mobilenet_v2_coco_2018_03_29.pbtxt')
 
     # Open a video/image file or a camera stream
     imsrc = args.input
@@ -316,9 +365,15 @@ def main():
         print_video_stats(cap)
         exit()
 
+    if args.width == 0:
+        inpWidth = adjust_dimension(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+    if args.height == 0:
+        inpHeight = adjust_dimension(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+
     starttime = datetime.datetime.now()
 
-    net, outNames = create_network(model)
+    eastmodel = f'{APP_DIR}/models/frozen_east_text_detection.pb'
+    net, outNames = create_network(eastmodel)
 
     set_next_frame(cap, args.frame)
     
@@ -335,7 +390,7 @@ def main():
             
             current_frame = int(cap.get(cv.CAP_PROP_POS_FRAMES)-1)
 
-            lockfile.write(('Started: {}\nFrame: {}/{}').format(
+            lockfile.write(('Started: {}\nFrame: {}/{}\n').format(
                 starttime.isoformat(), 
                 current_frame, 
                 int(cap.get(cv.CAP_PROP_FRAME_COUNT)))
@@ -354,8 +409,8 @@ def main():
             ids = [] # only used for debug
             for i, region in enumerate(text_areas):
 
-                overlaps = list(filter(lambda obj: is_rects_overlap(Rect(*region[0].bounding_box), Rect(*obj.rect)), 
-                                filtered_objects))
+                overlaps = list(filter(lambda obj: is_rects_overlap(region[0].bounding_box, obj.rect),
+                                       filtered_objects))
 
                 if not len(overlaps):
                     result.append(('', 0))
@@ -367,12 +422,12 @@ def main():
                 
                 ocrresults.append({
                     'rect': {
-                        'x': region[0].bounding_box[0], 
-                        'y': region[0].bounding_box[1], 
-                        'x1': region[0].bounding_box[2], 
-                        'y1': region[0].bounding_box[3]
-                    }, 
-                    'text': ocr[0], 
+                        'x': region[0].bounding_box.xmin,
+                        'y': region[0].bounding_box.ymin,
+                        'x1': region[0].bounding_box.xmax,
+                        'y1': region[0].bounding_box.ymax
+                    },
+                    'text': ocr[0],
                     'confidence': ocr[1]
                 })
 
@@ -386,20 +441,23 @@ def main():
 
             if args.debug:
                 for obj in filtered_objects:
-                    left, top, right, bottom = obj.rect
+                    left, top, right, bottom = astuple(obj.rect)
                     cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (73, 255, 0), thickness=2)
                 for i, text in enumerate(text_areas):
                     if i in ids:
                         continue
-                    left, top, right, bottom = text[0].bounding_box
+                    left, top, right, bottom = astuple(text[0].bounding_box)
                     cv.rectangle(frame, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=1)
-                    cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0))
+                    cv.putText(frame, '{} [{:.2f}%]'.format(result[i][0], result[i][1]), (int(right), int(bottom)), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
                 cv.imshow(WINDOW_LABEL, frame)
-                
     except Exception as e:
+        import traceback
         print(e, file=sys.stderr)
-        with open(imsrc+'.log') as f:
-            f.write(e)
+        with open(imsrc+'.log', 'w+') as f:
+            f.write(str(e) + '\n\n')
+            f.write(traceback.format_exc())
+    finally:
+        lockfile.__exit__()
 
     finishtime = datetime.datetime.now()
 
