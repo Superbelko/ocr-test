@@ -8,7 +8,7 @@ import os
 from collections import namedtuple
 from pathlib import Path
 from dataclasses import dataclass, astuple
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 
 import numpy as np
 import cv2 as cv
@@ -18,6 +18,7 @@ import app.perspective as perspective
 from app.objdetect import ObjDetectNetConfig, DetectedObject, CLASSES, detect_objects
 from app.lockfile import LockDummy, LockFile
 from app.common import Rect, Point
+from app.rects import find_rects
 
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 
@@ -29,6 +30,85 @@ WINDOW_LABEL = 'Debug view'
 class TextRegion:
     vertices: np.ndarray
     bounding_box: Rect
+
+@dataclass
+class TextDetectorConfig:
+    confThreshold: float = 0.5
+    nmsThreshold: float = 0.4
+
+
+# TODO: extract to own module
+class TextDetector:
+    _model = str()
+    _outputs = ["feature_fusion/Conv_7/Sigmoid", "feature_fusion/concat_3"]
+
+    def __init__(self, model: str):
+        TextDetector._model = TextDetector._model or model
+
+    def _makenet(self):
+        return cv.dnn.readNet(self._model)
+
+    def detect(self, image: np.ndarray, config: TextDetectorConfig=TextDetectorConfig()) -> List[Tuple[TextRegion,float]]:
+        results = []
+
+        # Get frame height and width
+        inpWidth = adjust_dimension(image.shape[1])
+        inpHeight = adjust_dimension(image.shape[0])
+        # keep for now, can be used to remap region in the future
+        rW = inpWidth / float(inpWidth)
+        rH = inpHeight / float(inpHeight)
+
+        net = self._makenet()
+        confThreshold = config.confThreshold
+        nmsThreshold = config.nmsThreshold
+        outNames = self._outputs
+
+        # Create a 4D blob from frame.
+        blob = cv.dnn.blobFromImage(image, 1.0, (inpWidth, inpHeight), (123.68, 116.78, 103.94), True, False)
+
+        # Run the model
+        net.setInput(blob)
+        outs = net.forward(outNames)
+        t, _ = net.getPerfProfile()
+
+        # Get scores and geometry
+        scores = outs[0]
+        geometry = outs[1]
+        [boxes, confidences] = decode(scores, geometry, confThreshold)
+
+        # Apply NMS
+        #im = image.copy()
+        indices = cv.dnn.NMSBoxesRotated(boxes, confidences, confThreshold, nmsThreshold)
+        for i in indices:
+            # get 4 corners of the rotated rect
+            vertices = cv.boxPoints(boxes[i[0]])
+
+            #cv.drawContours(im, [np.int0(vertices)], -1, (0, 255, 0), 2)
+            #cv.imshow(WINDOW_LABEL, im)
+            #cv.waitKey()
+
+            # scale the bounding box coordinates based on the respective ratios
+            for j in range(4):
+                vertices[j][0] *= rW
+                vertices[j][1] *= rH
+            #for j in range(4):
+            #    p1 = (vertices[j][0], vertices[j][1])
+            #    p2 = (vertices[(j + 1) % 4][0], vertices[(j + 1) % 4][1])
+            #    #cv.line(frame, p1, p2, (0, 255, 0), 1)
+
+            xmin = vertices[0][0]
+            xmax = 0
+            ymin = vertices[0][1]
+            ymax = 0
+            for p in vertices:
+                xmin = int(min(xmin, p[0]))
+                ymin = int(min(ymin, p[1]))
+                xmax = int(max(xmax, p[0]))
+                ymax = int(max(ymax, p[1]))
+
+            results.append((TextRegion(vertices, Rect(xmin, ymin, xmax, ymax)), confidences[i[0]]))
+
+        return results
 
 
 ############ Utility functions ############
@@ -263,11 +343,7 @@ def is_too_wide_for(obj: DetectedObject, dim: float) -> bool:
 
 
 def is_rects_overlap(a: Rect, b: Rect) -> bool: 
-    if int(a.xmin) > int(b.xmax) or int(a.xmax) < int(b.xmin):
-        return False
-    if int(b.ymin) > int(b.ymax) or int(a.ymax) < int(b.ymin):
-        return False
-    return True
+    return a.overlaps(b)
 
 
 def get_lock(dummy: bool) -> LockFile:
@@ -275,7 +351,7 @@ def get_lock(dummy: bool) -> LockFile:
         return LockDummy
     return LockFile
 
-def test_find_rect_contour(frame: np.ndarray) -> None:
+def test_find_rect_contour(frame: np.ndarray, net, outNames, confThreshold, nmsThreshold) -> None:
     """Find rects and try OCR them."""
 
     bw = cv.cvtColor(frame, cv.COLOR_RGB2GRAY)
@@ -296,7 +372,7 @@ def test_find_rect_contour(frame: np.ndarray) -> None:
     warped = perspective.four_point_transform(frame, cv.boxPoints(rct))
     dims = (adjust_dimension(warped.shape[1]), adjust_dimension(warped.shape[0]))
     rszd = cv.resize(warped, dims)
-    text_areas = detect_text_areas(rszd, net, sourceSize=(dims[0], dims[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
+    text_areas = detect_text_areas(rszd, net, sourceSize=(dims[0], dims[1]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
 
     for a in text_areas:
         reg: TextRegion
@@ -318,6 +394,37 @@ def test_find_rect_contour(frame: np.ndarray) -> None:
     cv.imshow(WINDOW_LABEL, frame)
     cv.waitKey()
 
+def is_rect_overlaps_anyobj(r: Rect, objects: List[DetectedObject]) -> bool:
+    for o in objects:
+        if is_rects_overlap(r, o.rect):
+            return True
+    return False
+
+
+def ocr_contour(frame: np.ndarray, contour: np.ndarray, detector: TextDetector) -> Optional[Tuple[TextRegion,float]]:
+    '''Do text detection on a contour, possibly return text'''
+
+    warped = perspective.four_point_transform(frame, contour)
+    #dims = (adjust_dimension(warped.shape[1]), adjust_dimension(warped.shape[0]))
+    #rszd = cv.resize(warped, dims)
+    #rszd = warped
+    text_areas = detector.detect(warped)
+
+    for a in text_areas:
+        reg: TextRegion
+        conf: float
+        reg, conf = a
+        b = reg.bounding_box
+        #b = Rect(max(0, b.xmin), max(0, b.ymin), min(warped.shape[1], b.xmax), min(warped.shape[0], b.ymax))
+        #cv.imshow(WINDOW_LABEL, warped[b.ymin:b.ymax, b.xmin:b.xmax])
+        #cv.waitKey()
+        #cv.line(frame, (int(b.xmin), int(b.ymin)), (int(b.xmax), int(b.ymin)), (0, 255, 255), 2)
+        #cv.line(frame, (int(b.xmin), int(b.ymax)), (int(b.xmax), int(b.ymax)), (0, 255, 255), 2)
+        #cv.line(frame, (int(b.xmin), int(b.ymin)), (int(b.xmin), int(b.ymax)), (0, 255, 255), 2)
+        #cv.line(frame, (int(b.xmax), int(b.ymin)), (int(b.xmax), int(b.ymax)), (0, 255, 255), 2)
+        text = ocr_image_region(warped, a)
+        #cv.putText(frame, '{} [{:.2f}%]'.format(text[0], text[1]), (int(b.xmax), int(b.ymax)), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    
 
 def main():
     parser = argparse.ArgumentParser(description='Use this script to run TensorFlow implementation (https://github.com/argman/EAST) of EAST: An Efficient and Accurate Scene Text Detector (https://arxiv.org/abs/1704.03155v2)')
@@ -398,12 +505,14 @@ def main():
 
             objects = detect_objects(frame, objdetectmodel, threshold=0.2)
             filtered_objects = list(filter(lambda obj: not is_too_wide_for(obj, frame.shape[1]), objects))
+            rects = find_rects(frame)
+            #rects = list(filter(lambda box: is_rect_overlaps_anyobj(Rect.from_cvrect(*cv.boundingRect(box)), filtered_objects), rects))
+            #test = list(filter(None, map(lambda r: ocr_contour(frame, r, TextDetector(eastmodel)), rects)))
 
             # resize source image for text detection
             resized = cv.resize(frame, (inpWidth, inpHeight))
 
             text_areas = detect_text_areas(resized, net, sourceSize=(frame.shape[1], frame.shape[0]), outNames=outNames, confThreshold=confThreshold, nmsThreshold=nmsThreshold)
-
             ocrresults = []
             result = []
             ids = [] # only used for debug
