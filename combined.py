@@ -5,6 +5,7 @@ import math
 import json
 import sys
 import os
+import signal
 from collections import namedtuple
 from pathlib import Path
 from dataclasses import dataclass, astuple
@@ -583,6 +584,10 @@ def main():
     if args.debug:
         cv.waitKey()
 
+    # BUG: WTF python???
+    # opencv dnn module net.forward hangs process on exit
+    # https://github.com/opencv/opencv/issues/16815
+    os.kill(os.getpid(), signal.SIGTERM)
 
 if __name__ == "__main__":
     main()
