@@ -585,8 +585,9 @@ def main():
         cv.waitKey()
 
     # BUG: WTF python???
-    # opencv dnn module net.forward hangs process on exit
+    # opencv dnn module net.forward hangs the process on exit
     # https://github.com/opencv/opencv/issues/16815
+    sys.stdout.flush()
     os.kill(os.getpid(), signal.SIGTERM)
 
 if __name__ == "__main__":
